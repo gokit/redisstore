@@ -2,11 +2,12 @@ package redisstore
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/gob"
 	"errors"
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/sessions"
 	"io"
 	"net/http"
@@ -26,6 +27,8 @@ type RedisStore struct {
 	keyGen KeyGenFunc
 	// session serializer
 	serializer SessionSerializer
+	// context
+	context context.Context
 }
 
 // KeyGenFunc defines a function used by store to generate a key
@@ -43,9 +46,15 @@ func NewRedisStore(client redis.UniversalClient) (*RedisStore, error) {
 		keyPrefix:  "session:",
 		keyGen:     generateRandomKey,
 		serializer: GobSerializer{},
+		context: context.Background(),
 	}
 
-	return rs, rs.client.Ping().Err()
+	return rs, rs.client.Ping(rs.context).Err()
+}
+
+func (s *RedisStore) WithContext(context context.Context) *RedisStore {
+	s.context = context
+	return s
 }
 
 // Get returns a session for the given name after adding it to the registry.
@@ -135,13 +144,13 @@ func (s *RedisStore) save(session *sessions.Session) error {
 		return err
 	}
 
-	return s.client.Set(s.keyPrefix+session.ID, b, time.Duration(session.Options.MaxAge)*time.Second).Err()
+	return s.client.Set(s.context, s.keyPrefix+session.ID, b, time.Duration(session.Options.MaxAge)*time.Second).Err()
 }
 
 // load reads session from Redis
 func (s *RedisStore) load(session *sessions.Session) error {
 
-	cmd := s.client.Get(s.keyPrefix + session.ID)
+	cmd := s.client.Get(s.context, s.keyPrefix + session.ID)
 	if cmd.Err() != nil {
 		return cmd.Err()
 	}
@@ -156,7 +165,7 @@ func (s *RedisStore) load(session *sessions.Session) error {
 
 // delete deletes session in Redis
 func (s *RedisStore) delete(session *sessions.Session) error {
-	return s.client.Del(s.keyPrefix + session.ID).Err()
+	return s.client.Del(s.context, s.keyPrefix + session.ID).Err()
 }
 
 // SessionSerializer provides an interface for serialize/deserialize a session
